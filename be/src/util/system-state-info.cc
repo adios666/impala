@@ -26,6 +26,8 @@
 #include "util/system-state-info.h"
 #include "util/time.h"
 
+#include <boost/lexical_cast.hpp>
+
 #include <numeric>
 #include <fstream>
 
@@ -80,6 +82,7 @@ namespace impala {
 // Partially initializing cpu_ratios_ will default-initialize the remaining members.
 SystemStateInfo::SystemStateInfo() {
   memset(&cpu_ratios_, 0, sizeof(cpu_ratios_));
+  memset(&cpu_ratio_, 0, sizeof(cpu_ratio_));
   memset(&network_usage_, 0, sizeof(network_usage_));
   memset(&disk_stats_, 0, sizeof(disk_stats_));
   ReadCurrentProcStat();
@@ -149,6 +152,7 @@ void SystemStateInfo::ComputeCpuRatios() {
   cpu_ratios_.user = ((cur[CPU_USER] - old[CPU_USER]) * BASIS_MAX) / total_tics;
   cpu_ratios_.system = ((cur[CPU_SYSTEM] - old[CPU_SYSTEM]) * BASIS_MAX) / total_tics;
   cpu_ratios_.iowait = ((cur[CPU_IOWAIT] - old[CPU_IOWAIT]) * BASIS_MAX) / total_tics;
+  cpu_ratio_ = lexical_cast<double>(cpu_ratios_.user + cpu_ratios_.system) / 100;
 }
 
 void SystemStateInfo::ReadCurrentProcNetDev() {

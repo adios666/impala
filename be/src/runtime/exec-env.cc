@@ -248,7 +248,7 @@ ExecEnv::ExecEnv(int krpc_port, int subscriber_port, int webserver_port,
   // Set StatestoreSubscriber::subscriber_id as hostname + krpc_port.
   statestore_subscriber_.reset(new StatestoreSubscriber(
       Substitute("impalad@$0:$1", FLAGS_hostname, FLAGS_krpc_port), subscriber_address,
-      statestore_address, metrics_.get()));
+      statestore_address, metrics_.get(), FLAGS_is_coordinator));
 
   if (FLAGS_is_coordinator) {
     hdfs_op_thread_pool_.reset(

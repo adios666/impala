@@ -385,6 +385,11 @@ DECLARE_string(jwks_file_path);
 DECLARE_string(jwks_url);
 DECLARE_bool(jwks_verify_server_certificate);
 DECLARE_string(jwks_ca_certificate);
+DECLARE_double(fix_mtdop_cpu_threshold);
+DECLARE_double(high_cpu_node_threshold);
+DECLARE_int64(high_load_keep_time_threshold);
+DECLARE_int32(high_load_query_count_threshold);
+DECLARE_bool(enable_mt_dop_adjust);
 
 namespace {
 using namespace impala;
@@ -452,6 +457,9 @@ const int64_t EXPIRATION_CHECK_INTERVAL_MS = 1000L;
 // TODO: Make consistent "Invalid or unknown query handle: $0" template used elsewhere.
 // TODO: this should be turned into a proper error code and used throughout ImpalaServer.
 static const char* LEGACY_INVALID_QUERY_HANDLE_TEMPLATE = "Query id $0 not found.";
+
+std::map<std::string, double> ImpalaServer::cpu_map_;
+boost::shared_mutex ImpalaServer::cpu_map_mutex_;
 
 ThreadSafeRandom ImpalaServer::rng_(GetRandomSeed32());
 
@@ -1156,6 +1164,39 @@ Status ImpalaServer::Execute(TQueryCtx* query_ctx, shared_ptr<SessionState> sess
   string stmt = replace_all_copy(query_ctx->client_request.stmt, "\n", " ");
   Redact(&stmt);
   query_ctx->client_request.__set_redacted_stmt((const string) stmt);
+
+  if (FLAGS_enable_mt_dop_adjust) {
+    double high_cpu_percentage = GetHighCPUNodePercentage(FLAGS_fix_mtdop_cpu_threshold);
+    if (high_cpu_percentage >= FLAGS_high_cpu_node_threshold) {
+      int mt_dop = query_ctx->client_request.query_options.mt_dop;
+      int new_mt_dop = mt_dop / reduce_factor_;
+      new_mt_dop = new_mt_dop >= 4 ? new_mt_dop : 0;
+
+      query_ctx->client_request.query_options.__set_mt_dop(new_mt_dop);
+      LOG(INFO) << "Current " << high_cpu_percentage * 100
+                << "% of nodes' CPU usage is higher than threshold "
+                << FLAGS_high_cpu_node_threshold
+                << ", reducing mt_dop to "
+                << new_mt_dop;
+      int64_t last_time = UnixMillis() - begin_reduce_mt_dop_time_;
+      if (last_time > FLAGS_high_load_keep_time_threshold ||
+          mt_dop_reduce_count_ > FLAGS_high_load_query_count_threshold) {
+        reduce_factor_  = min(reduce_factor_, 16);
+        LOG(INFO) << "Cluster load keeping high for "
+                  << last_time << " and reduce count is reduce count is "
+                  << mt_dop_reduce_count_
+                  << ", reduce factor will be doubled to "
+                  << reduce_factor_;
+        resetReduceMetrics();
+      }
+      ++mt_dop_reduce_count_;
+    } else {
+      // recover
+      resetReduceMetrics();
+      reduce_factor_ = 2;
+      LOG(INFO) << "cluster load is freed, reduce factor reset to 2";
+    }
+  }
 
   bool registered_query = false;
   Status status = ExecuteInternal(*query_ctx, external_exec_request, session_state,
@@ -3299,5 +3340,18 @@ __attribute__((noinline)) int ImpalaServer::SecretArg::ConstantTimeCompare(
   // TODO: consider replacing with CRYPTO_memcmp() once our minimum supported OpenSSL
   // version has it.
   return (secret_.hi != other.hi) + (secret_.lo != other.lo);
+}
+
+double ImpalaServer::GetHighCPUNodePercentage(double threshold) {
+  int high_node_size = 0;
+  cpu_map_mutex_.lock_shared();
+  auto cpu_map_copy = cpu_map_;
+  cpu_map_mutex_.unlock_shared();
+  for (auto it = cpu_map_copy.begin(); it != cpu_map_copy.end(); ++it) {
+    if (it->second / 100 >= threshold) {
+      high_node_size++;
+    }
+  }
+  return 1.0 * high_node_size / cpu_map_copy.size();
 }
 }

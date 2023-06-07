@@ -151,7 +151,8 @@ class StatestoreThriftIf : public StatestoreServiceIf {
       const TRegisterSubscriberRequest& params) {
     RegistrationId registration_id;
     Status status = statestore_->RegisterSubscriber(params.subscriber_id,
-        params.subscriber_location, params.topic_registrations, &registration_id);
+        params.subscriber_location, params.topic_registrations, params.is_coordinator,
+        &registration_id);
     status.ToThrift(&response.status);
     response.__set_registration_id(registration_id);
   }
@@ -318,10 +319,12 @@ void Statestore::Topic::ToJson(Document* document, Value* topic_json) {
 
 Statestore::Subscriber::Subscriber(const SubscriberId& subscriber_id,
     const RegistrationId& registration_id, const TNetworkAddress& network_address,
-    const vector<TTopicRegistration>& subscribed_topics)
+    const bool is_coordinator, const vector<TTopicRegistration>& subscribed_topics)
   : subscriber_id_(subscriber_id),
     registration_id_(registration_id),
-    network_address_(network_address) {
+    network_address_(network_address),
+    is_coordinator_(is_coordinator),
+    cpu_usage_rate_(0) {
   RefreshLastHeartbeatTimestamp();
   for (const TTopicRegistration& topic : subscribed_topics) {
     GetTopicsMapForId(topic.topic_name)
@@ -603,7 +606,7 @@ Status Statestore::OfferUpdate(const ScheduledSubscriberUpdate& update,
 
 Status Statestore::RegisterSubscriber(const SubscriberId& subscriber_id,
     const TNetworkAddress& location,
-    const vector<TTopicRegistration>& topic_registrations,
+    const vector<TTopicRegistration>& topic_registrations, const bool is_coordinator,
     RegistrationId* registration_id) {
   if (subscriber_id.empty()) return Status("Subscriber ID cannot be empty string");
 
@@ -633,18 +636,20 @@ Status Statestore::RegisterSubscriber(const SubscriberId& subscriber_id,
     SubscriberMap::iterator subscriber_it = subscribers_.find(subscriber_id);
     if (subscriber_it != subscribers_.end()) {
       UnregisterSubscriber(subscriber_it->second.get());
+      DeleteImpaladCpuMap(subscriber.get());
     }
 
     UUIDToTUniqueId(subscriber_uuid_generator_(), registration_id);
     shared_ptr<Subscriber> current_registration(
-        new Subscriber(subscriber_id, *registration_id, location, topic_registrations));
+        new Subscriber(subscriber_id, *registration_id, location, is_coordinator,
+        topic_registrations));
     subscribers_.emplace(subscriber_id, current_registration);
     failure_detector_->UpdateHeartbeat(subscriber_id, true);
     num_subscribers_metric_->SetValue(subscribers_.size());
     subscriber_set_metric_->Add(subscriber_id);
 
     // Add the subscriber to the update queue, with an immediate schedule.
-    ScheduledSubscriberUpdate update(0, subscriber_id, *registration_id);
+    ScheduledSubscriberUpdate update(0, subscriber_id, *registration_id, 0);
     RETURN_IF_ERROR(OfferUpdate(update, &subscriber_topic_update_threadpool_));
     RETURN_IF_ERROR(OfferUpdate(update, &subscriber_priority_topic_update_threadpool_));
     RETURN_IF_ERROR(OfferUpdate(update, &subscriber_heartbeat_threadpool_));
@@ -877,11 +882,28 @@ Status Statestore::SendHeartbeat(Subscriber* subscriber) {
   THeartbeatRequest request;
   THeartbeatResponse response;
   request.__set_registration_id(subscriber->registration_id());
+
+  StringPiece subscriber_id(subscriber->id());
+  if (subscriber->is_coordinator() && subscriber_id.starts_with("impalad")) {
+    request.__set_impala_cpu(impalaCpuInfo_);
+  }
+
   RETURN_IF_ERROR(
       client.DoRpc(&StatestoreSubscriberClientWrapper::Heartbeat, request, &response));
 
+  subscriber->set_cpu_usage_rate(response.cpu_usage_rate);
+  subscriber->set_address_backend(response.address);
+
   heartbeat_duration_metric_->Update(sw.ElapsedTime() / (1000.0 * 1000.0 * 1000.0));
   return Status::OK();
+}
+
+void Statestore::UpdateImpaladCpuMap(Subscriber* subscriber) {
+  impalaCpuInfo_[subscriber->address_backend()] = subscriber->cpu_usage_rate();
+}
+
+void Statestore::DeleteImpaladCpuMap(Subscriber* subscriber) {
+  impalaCpuInfo_.erase(subscriber->address_backend());
 }
 
 void Statestore::DoSubscriberUpdate(UpdateKind update_kind, int thread_id,
@@ -941,6 +963,7 @@ void Statestore::DoSubscriberUpdate(UpdateKind update_kind, int thread_id,
     status = SendHeartbeat(subscriber.get());
     if (status.ok()) {
       subscriber->RefreshLastHeartbeatTimestamp();
+      UpdateImpaladCpuMap(subscriber.get());
     } else if (status.code() == TErrorCode::RPC_RECV_TIMEOUT) {
       // Add details to status to make it more useful, while preserving the stack
       status.AddDetail(Substitute(
@@ -994,6 +1017,7 @@ void Statestore::DoSubscriberUpdate(UpdateKind update_kind, int thread_id,
                   << "or re-registered (last known registration ID: "
                   << PrintId(update.registration_id) << ")";
         UnregisterSubscriber(subscriber.get());
+        DeleteImpaladCpuMap(subscriber.get());
       } else {
         LOG(INFO) << "Failure was already detected for subscriber '" << subscriber->id()
                   << "'. Won't send another " << update_kind_str;
@@ -1003,7 +1027,8 @@ void Statestore::DoSubscriberUpdate(UpdateKind update_kind, int thread_id,
       VLOG(3) << "Next " << (is_heartbeat ? "heartbeat" : "update") << " deadline for: "
               << subscriber->id() << " is in " << deadline_ms << "ms";
       status = OfferUpdate(ScheduledSubscriberUpdate(deadline_ms, subscriber->id(),
-          subscriber->registration_id()), GetThreadPool(update_kind));
+          subscriber->registration_id(), subscriber->cpu_usage_rate()),
+          GetThreadPool(update_kind));
       if (!status.ok()) {
         LOG(INFO) << "Unable to send next " << update_kind_str
                   << " message to subscriber '" << subscriber->id() << "': "

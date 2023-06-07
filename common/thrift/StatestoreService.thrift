@@ -191,6 +191,12 @@ struct TRegisterSubscriberRequest {
 
   // List of topics to subscribe to
   4: required list<TTopicRegistration> topic_registrations;
+
+  // CPU usage of each hosts
+  5: optional double cpu_usage_rate;
+
+  // indicate that is coordinator or not
+  6: optional bool is_coordinator;
 }
 
 struct TRegisterSubscriberResponse {
@@ -234,10 +240,12 @@ struct TUpdateStateResponse {
 
 struct THeartbeatRequest {
   1: optional Types.TUniqueId registration_id;
+  2: optional map<string, double> impala_cpu;
 }
 
 struct THeartbeatResponse {
-
+  1: optional double cpu_usage_rate;
+  2: optional string address;
 }
 
 service StatestoreSubscriber {

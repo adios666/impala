@@ -514,6 +514,30 @@ class ImpalaServer : public ImpalaServiceIf,
   /// Returns true if 'user' was configured as an authorized proxy user.
   bool IsAuthorizedProxyUser(const std::string& user) WARN_UNUSED_RESULT;
 
+  /// Get CPU map of total cluster
+  static void SetCPUMap(const std::map<std::string, double>& cpu_map) {
+    cpu_map_mutex_.lock();
+    cpu_map_ = cpu_map;
+    cpu_map_mutex_.unlock();
+  }
+
+  static bool CmpByVal(const pair<std::string, double>& lhs,
+      const pair<std::string, double>& rhs) {
+    return lhs.second < rhs.second;
+  }
+
+  double GetMaxCPUUsage() {
+    return max_element(cpu_map_.begin(), cpu_map_.end(), CmpByVal)->second;
+  }
+
+  // Get percentage of how many nodes' cpu usage is higher than threshold
+  double GetHighCPUNodePercentage(double threshold);
+
+  inline void resetReduceMetrics() {
+    begin_reduce_mt_dop_time_ = UnixMillis();
+    mt_dop_reduce_count_ = 0;
+  }
+
   // Mapping between query option names and levels
   QueryOptionLevels query_option_levels_;
 
@@ -664,6 +688,21 @@ class ImpalaServer : public ImpalaServiceIf,
   static const char* SQLSTATE_OPTIONAL_FEATURE_NOT_IMPLEMENTED;
   /// String format of retry information returned in GetLog() RPCs.
   static const char* GET_LOG_QUERY_RETRY_INFO_FORMAT;
+
+  /// CPU map of total cluster
+  static std::map<std::string, double> cpu_map_;
+
+  /// lock of CPU map
+  static boost::shared_mutex cpu_map_mutex_;
+
+  /// timestamp of when it begins to reduce mt_dop, refreshed when not reduce
+  int64_t begin_reduce_mt_dop_time_ = UnixMillis();
+
+  /// count of how many queries is reduced
+  int64_t mt_dop_reduce_count_ = 0;
+
+  /// factor of reducing mt_dop, will be doubled if needed
+  int reduce_factor_ = 2;
 
   /// Used in situations where the client provides a session ID and a query ID and the
   /// caller needs to validate that the query can be accessed from the session. The two

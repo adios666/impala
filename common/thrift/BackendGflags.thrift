@@ -252,4 +252,14 @@ struct TBackendGflags {
   110: required bool skip_resource_checking_on_last_executor_group_set
 
   111: required i32 thrift_rpc_max_message_size
+
+  112: optional double fix_mtdop_cpu_threshold
+
+  113: optional double high_cpu_node_threshold
+
+  114: optional i64 high_load_keep_time_threshold
+
+  115: optional i32 high_load_query_count_threshold
+
+  116: optional bool enable_mt_dop_adjust
 }

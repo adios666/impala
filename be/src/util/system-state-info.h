@@ -55,6 +55,9 @@ class SystemStateInfo {
   /// two calls to CaptureSystemStateSnapshot().
   const CpuUsageRatios& GetCpuUsageRatios() { return cpu_ratios_; }
 
+  /// Returns total CPU usage ratio that sum of user and sys.
+  const double GetCpuUsageRatio() { return cpu_ratio_; }
+
   /// Network usage rates in bytes per second.
   struct NetworkUsage {
     int64_t rx_rate;
@@ -111,6 +114,9 @@ class SystemStateInfo {
   /// The computed CPU usage ratio between the current and previous snapshots in
   /// cpu_values_. Updated in ComputeCpuRatios().
   CpuUsageRatios cpu_ratios_;
+
+  /// The sum of user and sys CPU usage, calculated from cpu_ratios_
+  double cpu_ratio_;
 
   /// The enum names correspond to the fields of /proc/net/dev
   enum PROC_NET_DEV_VALUES {

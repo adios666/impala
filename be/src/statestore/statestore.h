@@ -153,6 +153,7 @@ class Statestore : public CacheLineAligned {
   Status RegisterSubscriber(const SubscriberId& subscriber_id,
       const TNetworkAddress& location,
       const std::vector<TTopicRegistration>& topic_registrations,
+      const bool is_coordinator,
       RegistrationId* registration_id) WARN_UNUSED_RESULT;
 
   /// Registers webpages for the input webserver. If metrics_only is set then only
@@ -357,7 +358,7 @@ class Statestore : public CacheLineAligned {
   class Subscriber {
    public:
     Subscriber(const SubscriberId& subscriber_id, const RegistrationId& registration_id,
-        const TNetworkAddress& network_address,
+        const TNetworkAddress& network_address, const bool is_coordinator ,
         const std::vector<TTopicRegistration>& subscribed_topics);
 
     /// Information about a subscriber's subscription to a specific topic.
@@ -401,6 +402,23 @@ class Statestore : public CacheLineAligned {
     const TNetworkAddress& network_address() const { return network_address_; }
     const SubscriberId& id() const { return subscriber_id_; }
     const RegistrationId& registration_id() const { return registration_id_; }
+    const bool is_coordinator() const { return is_coordinator_; }
+
+    double cpu_usage_rate() {
+      return cpu_usage_rate_;
+    }
+
+    void set_cpu_usage_rate(double cpu_usage_rate) {
+      cpu_usage_rate_ = cpu_usage_rate;
+    }
+
+    string address_backend() {
+      return address_backend_;
+    }
+
+    void set_address_backend(string address_backend) {
+      address_backend_ = address_backend;
+    }
 
     /// Returns the time elapsed (in seconds) since the last heartbeat.
     double SecondsSinceHeartbeat() const {
@@ -467,6 +485,13 @@ class Statestore : public CacheLineAligned {
 
     /// The location of the subscriber service that this subscriber runs.
     const TNetworkAddress network_address_;
+    const bool is_coordinator_;
+
+    /// CPU usage of each hosts.
+    double cpu_usage_rate_;
+
+    /// address of backend.
+    std::string address_backend_;
 
     /// Maps of topic subscriptions to current TopicSubscription, with separate maps for
     /// priority and non-priority topics. The state describes whether updates on the
@@ -508,6 +533,8 @@ class Statestore : public CacheLineAligned {
   /// Used to generated unique IDs for each new registration.
   boost::uuids::random_generator subscriber_uuid_generator_;
 
+  std::map<std::string, double> impalaCpuInfo_;
+
   /// Work item passed to both kinds of subscriber update threads.
   struct ScheduledSubscriberUpdate {
     /// *Earliest* time (in Unix time) that the next message should be sent.
@@ -518,11 +545,13 @@ class Statestore : public CacheLineAligned {
     SubscriberId subscriber_id;
     RegistrationId registration_id;
 
+    double cpu_usage_rate;
+
     ScheduledSubscriberUpdate() {}
 
     ScheduledSubscriberUpdate(int64_t next_update_time, SubscriberId s_id,
-        RegistrationId r_id): deadline(next_update_time), subscriber_id(s_id),
-        registration_id(r_id) {}
+        RegistrationId r_id, double cpu_usage_rate): deadline(next_update_time),
+        subscriber_id(s_id), registration_id(r_id), cpu_usage_rate(cpu_usage_rate){}
   };
 
   /// The statestore has three pools of threads that send messages to subscribers
@@ -653,6 +682,12 @@ class Statestore : public CacheLineAligned {
   bool FindSubscriber(const SubscriberId& subscriber_id,
       const RegistrationId& registration_id, std::shared_ptr<Subscriber>* subscriber)
       WARN_UNUSED_RESULT;
+
+  /// Update CPU map when sending heartbeat.
+  void UpdateImpaladCpuMap(Subscriber* subscriber);
+
+  /// Delete subscriber from CPU map when subscriber is no longer exist.
+  void DeleteImpaladCpuMap(Subscriber* subscriber);
 
   /// Unregister a subscriber, removing all of its transient entries and evicting it from
   /// the subscriber map. Callers must hold subscribers_lock_ prior to calling this

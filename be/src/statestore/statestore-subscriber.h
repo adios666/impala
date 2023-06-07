@@ -76,7 +76,7 @@ class StatestoreSubscriber {
   StatestoreSubscriber(const std::string& subscriber_id,
       const TNetworkAddress& heartbeat_address,
       const TNetworkAddress& statestore_address,
-      MetricGroup* metrics);
+      MetricGroup* metrics, const bool is_coordinator = false);
 
   /// A TopicDeltaMap is passed to each callback. See UpdateCallback for more details.
   typedef std::map<Statestore::TopicId, TTopicDelta> TopicDeltaMap;
@@ -126,6 +126,8 @@ class StatestoreSubscriber {
 
   const std::string& id() const { return subscriber_id_; }
 
+  bool is_coordinator() { return is_coordinator_; }
+
   /// Returns true if the statestore has recovered and the configurable post-recovery
   /// grace period has not yet elapsed.
   bool IsInPostRecoveryGracePeriod() const;
@@ -136,6 +138,8 @@ class StatestoreSubscriber {
 
   /// Address of the statestore
   TNetworkAddress statestore_address_;
+
+  bool is_coordinator_;
 
   /// Implementation of the heartbeat thrift interface, which proxies
   /// calls onto this object.

@@ -375,6 +375,12 @@ DEFINE_bool(pull_table_types_and_comments, false,
     "catalogd-only flag. Required if users want GET_TABLES requests return correct table "
     "types or comments.");
 
+DEFINE_double(fix_mtdop_cpu_threshold, 1.0, "CPU usage threshold for auto fix mt_dop, value range: [0,1]");
+DEFINE_double(high_cpu_node_threshold, 0.5, "If ratio of nodes CPU usage higher than 'fix_mtdop_cpu_threshold', will ""reduce mt_dop to 1/2");
+DEFINE_int64(high_load_keep_time_threshold, 300000, "High CPU usage lasting time threshold for determining if double ""reduce factor when fixing mt_dop");
+DEFINE_int32(high_load_query_count_threshold, 10, "Amount of ueries submitted when high CPU usage threshold for ""determining if double reduce factor when fixing mt_dop");
+DEFINE_bool(enable_mt_dop_adjust, false, "True if enable mt_dop fix");
+
 // TGeospatialLibrary's values are mapped here as constants
 static const string geo_lib_none = "NONE";
 static const string geo_lib_hive_esri = "HIVE_ESRI";

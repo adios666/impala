@@ -105,6 +105,11 @@ DECLARE_bool(pull_table_types_and_comments);
 DECLARE_bool(enable_reload_events);
 DECLARE_string(geospatial_library);
 DECLARE_int32(thrift_rpc_max_message_size);
+DECLARE_double(fix_mtdop_cpu_threshold);
+DECLARE_double(high_cpu_node_threshold);
+DECLARE_int64(high_load_keep_time_threshold);
+DECLARE_int32(high_load_query_count_threshold);
+DECLARE_bool(enable_mt_dop_adjust);
 
 // HS2 SAML2.0 configuration
 // Defined here because TAG_FLAG caused issues in global-flags.cc
@@ -409,6 +414,11 @@ Status PopulateThriftBackendGflags(TBackendGflags& cfg) {
   cfg.__set_skip_resource_checking_on_last_executor_group_set(
       FLAGS_skip_resource_checking_on_last_executor_group_set);
   cfg.__set_thrift_rpc_max_message_size(FLAGS_thrift_rpc_max_message_size);
+  cfg.__set_high_cpu_node_threshold(FLAGS_high_cpu_node_threshold);
+  cfg.__set_high_load_keep_time_threshold(FLAGS_high_load_keep_time_threshold);
+  cfg.__set_high_load_query_count_threshold(FLAGS_high_load_query_count_threshold);
+  cfg.__set_enable_mt_dop_adjust(FLAGS_enable_mt_dop_adjust);
+  cfg.__set_fix_mtdop_cpu_threshold(FLAGS_fix_mtdop_cpu_threshold);
   return Status::OK();
 }
 

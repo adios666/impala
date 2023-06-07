@@ -26,13 +26,16 @@
 #include <boost/thread/lock_options.hpp>
 #include <boost/thread/pthread/shared_mutex.hpp>
 #include <gutil/strings/substitute.h>
+#include <gutil/strings/stringpiece.h>
 
 #include "common/logging.h"
 #include "common/status.h"
+#include "service/impala-server.h"
 #include "statestore/failure-detector.h"
 #include "gen-cpp/StatestoreService_types.h"
 #include "rpc/rpc-trace.h"
 #include "rpc/thrift-util.h"
+#include "runtime/exec-env.h"
 #include "statestore/statestore-service-client-wrapper.h"
 #include "util/container-util.h"
 #include "util/collection-metrics.h"
@@ -41,6 +44,7 @@
 #include "util/openssl-util.h"
 #include "util/collection-metrics.h"
 #include "util/time.h"
+#include "util/system-state-info.h"
 
 #include "common/names.h"
 
@@ -76,6 +80,9 @@ DECLARE_string(ssl_private_key);
 DECLARE_string(ssl_private_key_password_cmd);
 DECLARE_string(ssl_cipher_list);
 DECLARE_string(ssl_minimum_version);
+DECLARE_bool(is_coordinator);
+DECLARE_string(hostname);
+DECLARE_int32(krpc_port);
 
 namespace impala {
 
@@ -115,6 +122,19 @@ class StatestoreSubscriberThriftIf : public StatestoreSubscriberIf {
 
   virtual void Heartbeat(THeartbeatResponse& response, const THeartbeatRequest& request) {
     subscriber_->Heartbeat(request.registration_id);
+
+    StringPiece subscriber_id(subscriber_->id());
+    if (subscriber_id.starts_with("impalad") && subscriber_->is_coordinator()) {
+      ImpalaServer::SetCPUMap(request.impala_cpu);
+    }
+
+    if (subscriber_id.starts_with("impalad")) {
+      response.__set_cpu_usage_rate(
+          ExecEnv::GetInstance()->system_state_info()->GetCpuUsageRatio());
+      } else {
+        response.__set_cpu_usage_rate(0);
+    }
+    response.__set_address(FLAGS_hostname + ":" + std::to_string(FLAGS_krpc_port));
   }
 
  private:
@@ -123,9 +143,10 @@ class StatestoreSubscriberThriftIf : public StatestoreSubscriberIf {
 
 StatestoreSubscriber::StatestoreSubscriber(const string& subscriber_id,
     const TNetworkAddress& heartbeat_address, const TNetworkAddress& statestore_address,
-    MetricGroup* metrics)
+    MetricGroup* metrics, bool is_coordinator)
   : subscriber_id_(subscriber_id),
     statestore_address_(statestore_address),
+    is_coordinator_(is_coordinator),
     thrift_iface_(new StatestoreSubscriberThriftIf(this)),
     failure_detector_(
         new TimeoutFailureDetector(seconds(FLAGS_statestore_subscriber_timeout_seconds),
@@ -191,6 +212,7 @@ Status StatestoreSubscriber::Register() {
 
   request.subscriber_location = heartbeat_address_;
   request.subscriber_id = subscriber_id_;
+  request.__set_is_coordinator(is_coordinator_);
   TRegisterSubscriberResponse response;
   int attempt = 0; // Used for debug action only.
   StatestoreServiceConn::RpcStatus rpc_status =
