@@ -1430,7 +1430,8 @@ public class SingleNodePlanner {
     // Propagate the conjuncts evaluating the nullable side of outer-join.
     // Don't mark them as assigned so they can be assigned at the JOIN node.
     evalInInlineViewPreds.addAll(evalAfterJoinPreds);
-    addConjunctsIntoInlineView(analyzer, inlineViewRef, evalInInlineViewPreds);
+    addConjunctsIntoInlineView(analyzer, inlineViewRef, evalInInlineViewPreds,
+        evalAfterJoinPreds);
   }
 
   /**
@@ -1476,7 +1477,7 @@ public class SingleNodePlanner {
    * Does not mark the conjuncts as assigned.
    */
   private void addConjunctsIntoInlineView(final Analyzer analyzer,
-          final InlineViewRef inlineViewRef, List<Expr> preds)
+          final InlineViewRef inlineViewRef, List<Expr> preds, List<Expr> predsAfterJoin)
                   throws AnalysisException {
     // Generate predicates to enforce equivalences among slots of the inline view
     // tuple. These predicates are also migrated into the inline view.

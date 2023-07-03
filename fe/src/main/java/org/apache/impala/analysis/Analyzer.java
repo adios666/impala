@@ -2724,7 +2724,10 @@ public class Analyzer {
       if (firstEqClassId != secondEqClassId) continue;
       // update equivalences and remove redundant conjuncts
       if (!partialEquivSlots.union(eqSlots.first, eqSlots.second)) {
-        conjunctIter.remove();
+        if (!ignoreSlots.contains(eqSlots.first) &&
+            !ignoreSlots.contains(eqSlots.second)) {
+          conjunctIter.remove();
+        }
         if (LOG.isTraceEnabled()) {
           LOG.trace("Removed redundant conjunct: " + conjunct.debugString());
         }
